@@ -96,6 +96,30 @@ target/cucumber-reports/cucumber.json
 target/surefire-reports
 ```
 
+## GitHub Actions
+
+The repository includes `.github/workflows/api-tests.yml`.
+
+Pipeline behavior:
+
+- Pull requests and pushes to `master` run `mvn test-compile` to validate the framework.
+- Manual workflow runs execute Cucumber API tests.
+- Scheduled workflow runs execute API tests when the `BASE_URL` repository secret is configured.
+- Test runs publish Cucumber, Allure, and Surefire reports as workflow artifacts.
+- Allure can be published to GitHub Pages when Pages is enabled for GitHub Actions.
+
+Manual workflow inputs:
+
+- `test_env`: `local`, `dev`, or `qa`
+- `cucumber_tags`: for example `@smoke` or `@regression`
+- `base_url`: optional URL override for the selected run
+
+Recommended repository secret for scheduled runs:
+
+```text
+BASE_URL=https://your-api-host.example.com
+```
+
 ## How To Add A New API Test
 
 1. Add a scenario in `src/test/resources/features`.

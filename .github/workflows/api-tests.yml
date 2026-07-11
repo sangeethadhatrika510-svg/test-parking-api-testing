@@ -1,0 +1,211 @@
+name: API Tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_env:
+        description: "Environment profile to run"
+        required: true
+        default: "qa"
+        type: choice
+        options:
+          - local
+          - dev
+          - qa
+      cucumber_tags:
+        description: "Cucumber tag expression"
+        required: true
+        default: "@smoke"
+        type: string
+      base_url:
+        description: "Optional base URL override, for example https://qa.example.com"
+        required: false
+        type: string
+  pull_request:
+    branches:
+      - master
+      - main
+  push:
+    branches:
+      - master
+  schedule:
+    - cron: "0 6 * * *"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: api-tests-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  api-tests:
+    name: API Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy-pages.outputs.page_url }}
+
+    env:
+      TEST_ENV: ${{ github.event_name == 'workflow_dispatch' && inputs.test_env || 'qa' }}
+      CUCUMBER_TAGS: ${{ github.event_name == 'workflow_dispatch' && inputs.cucumber_tags || '@smoke' }}
+      BASE_URL: ${{ github.event_name == 'workflow_dispatch' && inputs.base_url || secrets.BASE_URL }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Show selected test configuration
+        shell: bash
+        run: |
+          echo "Event      : ${{ github.event_name }}"
+          echo "Environment: $TEST_ENV"
+          echo "Tags       : $CUCUMBER_TAGS"
+          echo "Base URL   : ${BASE_URL:-profile default}"
+
+      - name: Compile test framework on pull requests and pushes
+        if: github.event_name == 'pull_request' || github.event_name == 'push'
+        shell: bash
+        run: mvn test-compile
+
+      - name: Validate scheduled test configuration
+        if: github.event_name == 'schedule' && env.BASE_URL == ''
+        shell: bash
+        run: |
+          echo "Scheduled API test runs require the BASE_URL repository secret." >&2
+          exit 1
+
+      - name: Run Maven API tests
+        if: github.event_name != 'pull_request' && github.event_name != 'push'
+        id: maven-tests
+        shell: bash
+        continue-on-error: true
+        run: |
+          if [ -n "$BASE_URL" ]; then
+            mvn clean test -Dtest.env="$TEST_ENV" -Dbase.url="$BASE_URL" -D"cucumber.filter.tags=$CUCUMBER_TAGS"
+          else
+            mvn clean test -Dtest.env="$TEST_ENV" -D"cucumber.filter.tags=$CUCUMBER_TAGS"
+          fi
+
+      - name: Add Allure executor metadata
+        if: always() && github.event_name != 'pull_request' && github.event_name != 'push'
+        shell: bash
+        run: |
+          mkdir -p target/allure-results
+          cat > target/allure-results/executor.json <<EOF
+          {
+            "name": "GitHub Actions",
+            "type": "github",
+            "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
+            "buildOrder": ${{ github.run_number }},
+            "buildName": "${{ github.workflow }} #${{ github.run_number }}",
+            "buildUrl": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
+            "reportName": "API Tests - ${TEST_ENV}"
+          }
+          EOF
+
+      - name: Generate Allure report
+        if: always() && github.event_name != 'pull_request' && github.event_name != 'push'
+        shell: bash
+        run: mvn allure:report
+
+      - name: Normalize Allure report metadata
+        if: always() && github.event_name != 'pull_request' && github.event_name != 'push'
+        shell: bash
+        run: |
+          if [ -f target/allure-report/widgets/summary.json ]; then
+            sed -i 's/"reportName":"Allure Report"/"reportName":"API Tests"/' target/allure-report/widgets/summary.json
+          fi
+
+      - name: Upload Cucumber report
+        if: always() && github.event_name != 'pull_request' && github.event_name != 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: cucumber-report
+          path: target/cucumber-reports/
+          if-no-files-found: ignore
+
+      - name: Upload Allure report
+        if: always() && github.event_name != 'pull_request' && github.event_name != 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-report
+          path: target/allure-report/
+          if-no-files-found: ignore
+
+      - name: Upload Surefire reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports
+          path: target/surefire-reports/
+          if-no-files-found: ignore
+
+      - name: Prepare GitHub Pages report
+        if: always() && github.ref == 'refs/heads/master' && github.event_name != 'pull_request' && github.event_name != 'push'
+        shell: bash
+        run: |
+          mkdir -p pages
+          cp -R target/allure-report/* pages/
+
+      - name: Configure GitHub Pages
+        if: always() && github.ref == 'refs/heads/master' && github.event_name != 'pull_request' && github.event_name != 'push'
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - name: Upload GitHub Pages artifact
+        if: always() && github.ref == 'refs/heads/master' && github.event_name != 'pull_request' && github.event_name != 'push'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: pages
+
+      - name: Deploy Allure report to GitHub Pages
+        id: deploy-pages
+        if: always() && github.ref == 'refs/heads/master' && github.event_name != 'pull_request' && github.event_name != 'push'
+        uses: actions/deploy-pages@v4
+
+      - name: Publish run summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## API Test Run"
+            echo ""
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Environment | \`$TEST_ENV\` |"
+            echo "| Tags | \`$CUCUMBER_TAGS\` |"
+            echo "| Base URL | \`${BASE_URL:-profile default}\` |"
+            if [ "${{ github.event_name }}" != "pull_request" ] && [ "${{ github.event_name }}" != "push" ]; then
+              echo "| Maven result | \`${{ steps.maven-tests.outcome }}\` |"
+              echo ""
+              echo "Reports are available from this workflow run's artifacts:"
+              echo ""
+              echo "- cucumber-report"
+              echo "- allure-report"
+              echo "- surefire-reports"
+              if [ -n "${{ steps.deploy-pages.outputs.page_url }}" ]; then
+                echo ""
+                echo "Published Allure report: ${{ steps.deploy-pages.outputs.page_url }}"
+              fi
+            else
+              echo ""
+              echo "Validation compiled the test framework."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail job when tests fail
+        if: github.event_name != 'pull_request' && github.event_name != 'push' && steps.maven-tests.outcome != 'success'
+        shell: bash
+        run: exit 1
