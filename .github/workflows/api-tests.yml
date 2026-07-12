@@ -1,0 +1,181 @@
+name: Parking API Tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_env:
+        description: "Environment profile"
+        required: true
+        default: "qa"
+        type: choice
+        options:
+          - local
+          - dev
+          - qa
+      cucumber_tags:
+        description: "Cucumber tag expression"
+        required: true
+        default: "@smoke"
+        type: string
+      base_url:
+        description: "Optional API base URL override"
+        required: false
+        type: string
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 6 * * *"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: api-tests-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  api-tests:
+    name: API Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy-pages.outputs.page_url }}
+
+    env:
+      TEST_ENV: ${{ github.event_name == 'workflow_dispatch' && inputs.test_env || 'qa' }}
+      CUCUMBER_TAGS: ${{ github.event_name == 'workflow_dispatch' && inputs.cucumber_tags || '@smoke' }}
+      BASE_URL: ${{ github.event_name == 'workflow_dispatch' && inputs.base_url || secrets.BASE_URL }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Show selected configuration
+        shell: bash
+        run: |
+          echo "Event       : ${{ github.event_name }}"
+          echo "Environment : $TEST_ENV"
+          echo "Tags        : $CUCUMBER_TAGS"
+          echo "Base URL    : ${BASE_URL:-profile default}"
+
+      - name: Compile framework
+        if: github.event_name == 'pull_request' || github.event_name == 'push'
+        run: mvn --batch-mode test-compile
+
+      - name: Require BASE_URL for scheduled runs
+        if: github.event_name == 'schedule' && env.BASE_URL == ''
+        run: |
+          echo "Set the BASE_URL repository secret before enabling scheduled runs." >&2
+          exit 1
+
+      - name: Run tagged API tests
+        if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+        id: tests
+        continue-on-error: true
+        shell: bash
+        run: |
+          args=(clean test "-Dtest.env=$TEST_ENV" "-Dcucumber.filter.tags=$CUCUMBER_TAGS")
+          if [ -n "$BASE_URL" ]; then
+            args+=("-Dbase.url=$BASE_URL")
+          fi
+          mvn --batch-mode "${args[@]}"
+
+      - name: Add Allure run metadata
+        if: always() && (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule')
+        shell: bash
+        run: |
+          mkdir -p target/allure-results
+          cat > target/allure-results/executor.json <<EOF
+          {
+            "name": "GitHub Actions",
+            "type": "github",
+            "buildOrder": ${{ github.run_number }},
+            "buildName": "${{ github.workflow }} #${{ github.run_number }}",
+            "buildUrl": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
+            "reportName": "Parking API Tests - ${TEST_ENV}"
+          }
+          EOF
+
+      - name: Generate Allure report
+        if: always() && (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule')
+        run: mvn --batch-mode allure:report
+
+      - name: Upload Cucumber report
+        if: always() && (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule')
+        uses: actions/upload-artifact@v4
+        with:
+          name: cucumber-report-${{ github.run_number }}
+          path: target/cucumber-reports/
+          if-no-files-found: ignore
+
+      - name: Upload Allure report
+        if: always() && (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule')
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-report-${{ github.run_number }}
+          path: target/allure-report/
+          if-no-files-found: ignore
+
+      - name: Upload Surefire reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports-${{ github.run_number }}
+          path: target/surefire-reports/
+          if-no-files-found: ignore
+
+      - name: Prepare GitHub Pages
+        if: always() && github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule')
+        run: |
+          mkdir -p pages
+          cp -R target/allure-report/. pages/
+
+      - name: Configure GitHub Pages
+        if: always() && github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule')
+        uses: actions/configure-pages@v5
+
+      - name: Upload GitHub Pages artifact
+        if: always() && github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule')
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: pages
+
+      - name: Deploy Allure to GitHub Pages
+        id: deploy-pages
+        if: always() && github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule')
+        uses: actions/deploy-pages@v4
+
+      - name: Publish run summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Parking API Test Run"
+            echo ""
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Environment | \`$TEST_ENV\` |"
+            echo "| Tags | \`$CUCUMBER_TAGS\` |"
+            echo "| Base URL | \`${BASE_URL:-profile default}\` |"
+            if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.event_name }}" = "schedule" ]; then
+              echo "| Test result | \`${{ steps.tests.outcome }}\` |"
+            else
+              echo "| Validation | \`test-compile\` |"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail when tests fail
+        if: (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') && steps.tests.outcome != 'success'
+        run: exit 1

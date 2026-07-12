@@ -94,7 +94,21 @@ After execution:
 target/cucumber-reports/cucumber.html
 target/cucumber-reports/cucumber.json
 target/surefire-reports
+target/allure-results
+target/allure-report
 ```
+
+## GitHub Actions
+
+The workflow at `.github/workflows/api-tests.yml` provides:
+
+- Java 21 and Maven framework validation on pushes and pull requests to `main`.
+- Manual API test runs with environment and Cucumber tag inputs.
+- A daily scheduled test run at 06:00 UTC when the `BASE_URL` secret is configured.
+- Cucumber HTML/JSON, Allure HTML, and Surefire XML workflow artifacts.
+- Optional Allure publication through GitHub Pages.
+
+For scheduled execution, add `BASE_URL` under **Settings > Secrets and variables > Actions**. To publish Allure, set **Settings > Pages > Build and deployment > Source** to **GitHub Actions**.
 
 ## How To Add A New API Test
 
