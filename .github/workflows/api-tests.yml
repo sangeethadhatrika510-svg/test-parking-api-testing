@@ -6,12 +6,13 @@ on:
       test_env:
         description: "Environment profile"
         required: true
-        default: "qa"
+        default: "aws-ec2"
         type: choice
         options:
           - local
           - dev
           - qa
+          - aws-ec2
       cucumber_tags:
         description: "Cucumber tag expression"
         required: true
@@ -36,14 +37,14 @@ concurrency:
 jobs:
   api-tests:
     name: API Tests
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     timeout-minutes: 30
     environment:
       name: github-pages
       url: ${{ steps.deploy-pages.outputs.page_url }}
 
     env:
-      TEST_ENV: ${{ github.event_name == 'workflow_dispatch' && inputs.test_env || 'qa' }}
+      TEST_ENV: ${{ github.event_name == 'workflow_dispatch' && inputs.test_env || 'aws-ec2' }}
       CUCUMBER_TAGS: ${{ github.event_name == 'workflow_dispatch' && inputs.cucumber_tags || '@smoke' }}
       API_BASE_URL: ${{ secrets.API_BASE_URL }}
       AUTH_BASE_URL: ${{ secrets.AUTH_BASE_URL }}

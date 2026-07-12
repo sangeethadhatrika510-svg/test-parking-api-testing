@@ -70,6 +70,7 @@ Available examples:
 - `local.properties`
 - `qa.properties`
 - `dev.properties`
+- `aws-ec2.properties`
 
 Default environment is `local`.
 
@@ -108,7 +109,7 @@ The workflow at `.github/workflows/api-tests.yml` provides:
 - Cucumber HTML/JSON, Allure HTML, and Surefire XML workflow artifacts.
 - Allure publication through GitHub Pages for manual and scheduled test runs.
 
-The environment profiles contain default direct service URLs. They can be overridden with repository secrets named `API_BASE_URL`, `AUTH_BASE_URL`, `LOCATION_BASE_URL`, `BOOKING_BASE_URL`, and `PAYMENT_BASE_URL`. All reports remain available as workflow artifacts. To publish Allure at a permanent URL, set **Settings > Pages > Build and deployment > Source** to **GitHub Actions** before running the workflow.
+The workflow uses a self-hosted EC2 runner and defaults to `aws-ec2`, where tests call services through `127.0.0.1` on ports 8081-8085. The runner must be registered with this repository and running on the EC2 instance. Service URLs can be overridden with repository secrets named `API_BASE_URL`, `AUTH_BASE_URL`, `LOCATION_BASE_URL`, `BOOKING_BASE_URL`, and `PAYMENT_BASE_URL`. All reports remain available as workflow artifacts. To publish Allure at a permanent URL, set **Settings > Pages > Build and deployment > Source** to **GitHub Actions** before running the workflow.
 
 ## How To Add A New API Test
 
