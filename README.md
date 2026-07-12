@@ -18,7 +18,7 @@ Default Java API automation template using:
 ├── src
 │   └── test
 │       ├── java
-│       │   └── com/example/api
+│       │   └── com/example/com.example.api.api
 │       │       ├── clients
 │       │       ├── config
 │       │       ├── context
@@ -99,8 +99,8 @@ target/surefire-reports
 ## How To Add A New API Test
 
 1. Add a scenario in `src/test/resources/features`.
-2. Add or update a client class in `src/test/java/com/example/api/clients`.
-3. Add step definitions in `src/test/java/com/example/api/steps`.
+2. Add or update a client class in `src/test/java/com/example/com.example.api.api/clients`.
+3. Add step definitions in `src/test/java/com/example/com.example.api.api/steps`.
 4. Use tags such as `@smoke`, `@regression`, `@auth`, or service-specific tags.
 
 ## Sample Tags

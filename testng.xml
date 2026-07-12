@@ -3,7 +3,7 @@
 <suite name="API Test Suite" parallel="false">
     <test name="Cucumber API Tests">
         <classes>
-            <class name="com.example.api.runners.CucumberTestRunner"/>
+            <class name="com.example.com.example.api.api.runners.CucumberTestRunner"/>
         </classes>
     </test>
 </suite>

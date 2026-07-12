@@ -11,6 +11,8 @@ import io.cucumber.testng.CucumberOptions;
                 "html:target/cucumber-reports/cucumber.html",
                 "json:target/cucumber-reports/cucumber.json"
         },
+        tags="@location and @locationspace",
+
         monochrome = true
 )
 public class CucumberTestRunner extends AbstractTestNGCucumberTests {

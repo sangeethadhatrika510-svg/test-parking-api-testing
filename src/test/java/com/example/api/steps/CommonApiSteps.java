@@ -2,6 +2,7 @@ package com.example.api.steps;
 
 import com.example.api.clients.ApiClient;
 import com.example.api.context.ScenarioContext;
+import io.cucumber.java.en.Given;
 import io.cucumber.java.en.Then;
 import io.cucumber.java.en.When;
 import org.testng.Assert;
