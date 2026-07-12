@@ -21,6 +21,11 @@ on:
         description: "Optional API base URL override"
         required: false
         type: string
+      publish_pages:
+        description: "Publish the Allure report to GitHub Pages"
+        required: true
+        default: false
+        type: boolean
   pull_request:
     branches: [main]
   push:
@@ -137,24 +142,24 @@ jobs:
           if-no-files-found: ignore
 
       - name: Prepare GitHub Pages
-        if: always() && github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule')
+        if: always() && github.event_name == 'workflow_dispatch' && inputs.publish_pages && github.ref == 'refs/heads/main'
         run: |
           mkdir -p pages
           cp -R target/allure-report/. pages/
 
       - name: Configure GitHub Pages
-        if: always() && github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule')
+        if: always() && github.event_name == 'workflow_dispatch' && inputs.publish_pages && github.ref == 'refs/heads/main'
         uses: actions/configure-pages@v5
 
       - name: Upload GitHub Pages artifact
-        if: always() && github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule')
+        if: always() && github.event_name == 'workflow_dispatch' && inputs.publish_pages && github.ref == 'refs/heads/main'
         uses: actions/upload-pages-artifact@v3
         with:
           path: pages
 
       - name: Deploy Allure to GitHub Pages
         id: deploy-pages
-        if: always() && github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule')
+        if: always() && github.event_name == 'workflow_dispatch' && inputs.publish_pages && github.ref == 'refs/heads/main'
         uses: actions/deploy-pages@v4
 
       - name: Publish run summary

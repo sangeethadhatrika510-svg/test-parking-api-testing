@@ -106,9 +106,9 @@ The workflow at `.github/workflows/api-tests.yml` provides:
 - Manual API test runs with environment and Cucumber tag inputs.
 - A daily scheduled test run at 06:00 UTC when the `BASE_URL` secret is configured.
 - Cucumber HTML/JSON, Allure HTML, and Surefire XML workflow artifacts.
-- Optional Allure publication through GitHub Pages.
+- Optional Allure publication through GitHub Pages when `publish_pages` is selected for a manual run.
 
-For scheduled execution, add `BASE_URL` under **Settings > Secrets and variables > Actions**. To publish Allure, set **Settings > Pages > Build and deployment > Source** to **GitHub Actions**.
+For scheduled execution, add `BASE_URL` under **Settings > Secrets and variables > Actions**. All reports remain available as workflow artifacts. To publish Allure, first set **Settings > Pages > Build and deployment > Source** to **GitHub Actions**, and then select `publish_pages` when manually running the workflow.
 
 ## How To Add A New API Test
 
