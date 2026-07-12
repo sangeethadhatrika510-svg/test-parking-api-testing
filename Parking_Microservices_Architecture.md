@@ -1,290 +1,309 @@
-# Parking Microservices Architecture
+# Parking Services Architecture
 
-This document describes the architecture implemented by the service code under `D:\Project\Parking`.
+This document is based on two sources:
 
-## Review Conclusion
+- The Spring Boot controller and configuration code under `D:\Project\Parking`.
+- `Parking Platform.postman_collection.json` and `Parking Local.postman_environment.json`.
 
-The `parking-api-service` is deployed and routed by the gateway, but it is not part of the current parking business workflow. It provides only:
+The Postman collection communicates directly with each service. This document therefore shows direct service communication only.
 
-- `GET /status` and `GET /api/status`
-- `GET /api/secure/sample` and `GET /api/secure/hello`
-
-These endpoints demonstrate status and JWT-protected access. Auth, location, booking, session, and payment operations do not call this service. The diagrams therefore show it as an optional demonstration service rather than a core parking service.
-
-The code also shows these important architectural facts:
-
-- The client or automated test orchestrates the workflow by calling each service.
-- The domain services do not make HTTP calls to one another.
-- Auth, Location, Booking, and Payment use the same PostgreSQL `parking_db` database.
-- Each domain service owns a different group of tables inside that shared database.
-- IDs such as `locationId`, `bookingId`, and `sessionId` are passed between APIs, but the services do not currently verify them by calling one another.
-
-## 1. Actual Runtime Architecture
+## 1. Services Used by the Collection
 
 ```mermaid
 flowchart LR
-    Client["Client<br/>Application / Postman / Rest Assured"]
-    Gateway["Parking Gateway<br/>Port 8080"]
+    Client["Client<br/>Postman / Rest Assured / Application"]
 
-    subgraph Core["Core parking services"]
-        Auth["Auth Service<br/>Port 8082"]
-        Location["Location Service<br/>Port 8083"]
-        Booking["Booking Service<br/>Port 8084"]
-        Payment["Payment Service<br/>Port 8085"]
-    end
+    API["API Service<br/>http://localhost:8081<br/>Status and secured sample"]
+    Auth["Auth Service<br/>http://localhost:8082<br/>Register, login, JWT"]
+    Location["Location Service<br/>http://localhost:8083<br/>Parking inventory"]
+    Booking["Booking Service<br/>http://localhost:8084<br/>Bookings and sessions"]
+    Payment["Payment Service<br/>http://localhost:8085<br/>Mock payment processing"]
 
-    API["API Service<br/>Port 8081<br/>Secured sample only"]
-    DB[("PostgreSQL / RDS<br/>parking_db")]
+    DB[("PostgreSQL<br/>parking_db")]
 
-    Client -->|Preferred entry point| Gateway
-    Gateway --> Auth
-    Gateway --> Location
-    Gateway --> Booking
-    Gateway --> Payment
+    Client -->|apiBaseUrl| API
+    Client -->|authBaseUrl| Auth
+    Client -->|locationBaseUrl| Location
+    Client -->|bookingBaseUrl| Booking
+    Client -->|paymentBaseUrl| Payment
 
-    Gateway -.->|Optional /api demonstration routes| API
+    Auth --> DB
+    Location --> DB
+    Booking --> DB
+    Payment --> DB
 
-    Auth -->|users and user_roles| DB
-    Location -->|zones, locations, spaces, cameras| DB
-    Booking -->|bookings and sessions| DB
-    Payment -->|cards, rules, transactions| DB
-
-    classDef optional fill:#f4f4f4,stroke:#777,stroke-dasharray:5 5,color:#333;
-    class API optional;
+    classDef sample fill:#f4f4f4,stroke:#777,stroke-dasharray:5 5,color:#333;
+    class API sample;
 ```
 
-The API service is still a runnable service and gateway route. The dashed connection means it is not used by the core parking journey.
+The API service appears in the collection, but it is not used to perform the parking business workflow. It independently demonstrates a public status endpoint and a JWT-protected endpoint.
 
-## 2. Gateway Routing
+## 2. Postman Collection Structure
 
 ```mermaid
 flowchart TB
-    Request["Incoming request"] --> Gateway["Gateway :8080"]
+    Collection["Parking Platform Postman Collection"]
 
-    Gateway --> Filters["Global filters"]
-    Filters --> Correlation["Create or propagate<br/>X-Correlation-Id"]
-    Filters --> Headers["Add gateway and<br/>original-path headers"]
-    Filters --> Limit["In-memory rate limit<br/>120 requests/minute by default"]
-    Filters --> JWT["Validate Bearer JWT<br/>for protected routes"]
+    Collection --> AuthFolder["Auth Service"]
+    AuthFolder --> AuthStatus["GET /status"]
+    AuthFolder --> RegisterAdmin["POST /auth/register<br/>Admin user"]
+    AuthFolder --> RegisterUser["POST /auth/register<br/>Standard user"]
+    AuthFolder --> Login["POST /auth/login"]
 
-    JWT --> Router{"Route by path"}
-    Router -->|/auth/**| Auth["Auth :8082"]
-    Router -->|/zones/**<br/>/parking-locations/**<br/>/spaces/**<br/>/cameras/**| Location["Location :8083"]
-    Router -->|/bookings/**<br/>/sessions/**| Booking["Booking :8084"]
-    Router -->|/test-cards/**<br/>/payment-rules/**<br/>/payments/**| Payment["Payment :8085"]
-    Router -.->|/api/**| API["API :8081<br/>sample endpoints"]
+    Collection --> APIFolder["API Service"]
+    APIFolder --> APIStatus["GET /status"]
+    APIFolder --> SecureSample["GET /api/secure/hello"]
 
-    Location --> Resilience["GET retry and circuit breaker"]
-    Booking --> Resilience
-    Payment --> Resilience
-    API -.-> Resilience
-    Auth --> Circuit["Circuit breaker"]
+    Collection --> LocationFolder["Location Service"]
+    LocationFolder --> LocationOperations["Status, zones, locations,<br/>spaces, availability, cameras"]
 
-    Resilience --> Response["Response to client"]
-    Circuit --> Response
+    Collection --> BookingFolder["Booking Service"]
+    BookingFolder --> BookingOperations["Status, bookings,<br/>sessions and session queries"]
+
+    Collection --> PaymentFolder["Payment Service"]
+    PaymentFolder --> PaymentOperations["Status, test cards, rules,<br/>payment lifecycle and queries"]
 ```
 
-The gateway retries only `GET` requests for selected upstream failure statuses. Circuit-breaker fallback responses are produced when a downstream service is unavailable.
+Postman stores returned identifiers in collection variables such as `zoneId`, `locationId`, `spaceId`, `cameraId`, `bookingId`, `sessionId`, `cardId`, and `paymentId`. Later requests use those variables directly.
 
-## 3. Authentication and Authorization
-
-```mermaid
-sequenceDiagram
-    autonumber
-
-    actor User
-    participant Gateway
-    participant Auth as Auth Service
-    participant DB as PostgreSQL
-    participant Domain as Location / Booking / Payment
-
-    User->>Gateway: POST /auth/register
-    Gateway->>Auth: Route public request
-    Auth->>DB: Insert users and user_roles
-    DB-->>Auth: User stored
-    Auth-->>User: 201 user response
-
-    User->>Gateway: POST /auth/login
-    Gateway->>Auth: Route public request
-    Auth->>DB: Read user and roles
-    Auth->>Auth: Verify encoded password
-    Auth->>Auth: Sign JWT using shared secret
-    Auth-->>User: Bearer access token
-
-    User->>Gateway: Protected request + JWT
-    Gateway->>Gateway: Validate signature and expiry
-    Gateway->>Domain: Forward JWT request
-    Domain->>Domain: Validate JWT again
-    Domain->>Domain: Apply method role rule
-    Domain-->>User: 2xx, 401, or 403 response
-```
-
-The services share the JWT signing secret through environment configuration. They do not call Auth to validate every request; each protected service validates the token locally.
-
-## 4. Shared Database and Table Ownership
-
-```mermaid
-flowchart TB
-    DB[("parking_db<br/>PostgreSQL locally or RDS on AWS")]
-
-    Auth["Auth Service"] --> AuthTables["users<br/>user_roles"]
-    Location["Location Service"] --> LocationTables["parking_zones<br/>parking_locations<br/>parking_spaces<br/>camera_devices"]
-    Booking["Booking Service"] --> BookingTables["parking_bookings<br/>parking_sessions"]
-    Payment["Payment Service"] --> PaymentTables["mock_cards<br/>payment_rules<br/>payment_transactions"]
-
-    AuthTables --> DB
-    LocationTables --> DB
-    BookingTables --> DB
-    PaymentTables --> DB
-
-    API["API Service"] -.-> NoDB["No datasource or domain tables"]
-```
-
-This is a shared-database architecture, not a separate database per microservice. The service code separates table responsibilities, but all four stateful services connect to the same configured database.
-
-## 5. Current Business Workflow
+## 3. Authentication and Direct JWT Use
 
 ```mermaid
 sequenceDiagram
     autonumber
 
     actor Client
-    participant Gateway
-    participant Auth
-    participant Location
-    participant Booking
-    participant Payment
-    participant DB as Shared parking_db
+    participant Auth as Auth Service :8082
+    participant AuthDB as PostgreSQL
+    participant API as API Service :8081
+    participant Domain as Location / Booking / Payment
 
-    Client->>Gateway: Register and login
-    Gateway->>Auth: /auth/**
-    Auth->>DB: Store/read user
-    Auth-->>Client: JWT
+    Client->>Auth: POST /auth/register
+    Auth->>AuthDB: Insert users and user_roles
+    AuthDB-->>Auth: User stored
+    Auth-->>Client: 201 user response
 
-    Client->>Gateway: Create zone
-    Gateway->>Location: POST /zones
-    Location->>DB: Insert parking_zones
+    Client->>Auth: POST /auth/login
+    Auth->>AuthDB: Read user and roles
+    Auth->>Auth: Verify password and sign JWT
+    Auth-->>Client: Bearer access token
 
-    Client->>Gateway: Create location
-    Gateway->>Location: POST /parking-locations
-    Location->>DB: Insert parking_locations
+    Client->>API: GET /api/secure/hello + JWT
+    API->>API: Validate JWT locally
+    API-->>Client: Authorized sample response
 
-    Client->>Gateway: Create parking space
-    Gateway->>Location: POST /parking-locations/{id}/spaces
-    Location->>DB: Insert parking_spaces
-
-    Client->>Gateway: Create booking using locationId and spaceId
-    Gateway->>Booking: POST /bookings
-    Booking->>DB: Insert REQUESTED booking
-
-    Client->>Gateway: Confirm booking
-    Gateway->>Booking: POST /bookings/{id}/confirm
-    Booking->>DB: Set booking CONFIRMED
-
-    Client->>Gateway: Start session from booking
-    Gateway->>Booking: POST /sessions/start-with-booking/{id}
-    Booking->>DB: Insert ACTIVE session
-
-    Client->>Gateway: Create payment intent
-    Gateway->>Payment: POST /payments/intent
-    Payment->>DB: Insert CREATED transaction
-
-    Client->>Gateway: Confirm payment
-    Gateway->>Payment: POST /payments/{id}/confirm
-    Payment->>DB: Update transaction and card balance
-
-    Client->>Gateway: End session
-    Gateway->>Booking: POST /sessions/{id}/end
-    Booking->>DB: Set session ENDED
+    Client->>Domain: Protected request + JWT
+    Domain->>Domain: Validate JWT and required roles locally
+    Domain-->>Client: API response
 ```
 
-Notice that Location does not call Booking, and Booking does not call Payment. The client carries resource IDs from one API response into later requests.
+The token returned by Auth is stored as the Postman `token` variable. The collection sends it directly to protected APIs using `Authorization: Bearer {{token}}`.
 
-## 6. Logical Cross-Service References
+The protected services validate the JWT themselves using the configured shared secret. They do not call Auth for every request.
+
+## 4. API Service Scope
 
 ```mermaid
 flowchart LR
-    Zone["Zone ID"] --> Location["Parking Location"]
-    Location -->|locationId| Space["Parking Space"]
+    Client["Client"] --> Status["GET :8081/status"]
+    Status --> PublicResponse["Public service status"]
 
-    Location -->|locationId| Booking["Booking"]
-    Space -->|optional spaceId| Booking
+    Client --> Secure["GET :8081/api/secure/hello<br/>Bearer JWT required"]
+    Secure --> Validation{"JWT valid?"}
+    Validation -->|Yes| Authorized["Return username and<br/>authorization message"]
+    Validation -->|No| Unauthorized["401 Unauthorized"]
 
-    Booking -->|bookingId| Session["Parking Session"]
-    Location -->|locationId| Session
-    Space -->|optional spaceId| Session
-
-    Booking -.->|optional bookingId| Transaction["Payment Transaction"]
-    Session -.->|optional sessionId| Transaction
-    Card["Mock Card"] -->|cardId| Transaction
+    Secure -.-> ParkingFlow["No location, booking,<br/>session or payment operations"]
 ```
 
-These are logical references passed as numeric IDs. Except for relationships inside an individual service's table group, the current migrations do not define database foreign keys between the Location, Booking, and Payment table groups.
+The controller also provides aliases `GET /api/status` and `GET /api/secure/sample`. The current collection uses `/status` and `/api/secure/hello`.
 
-## 7. Parking Session Lifecycle
+## 5. Shared Database and Table Ownership
 
 ```mermaid
-stateDiagram-v2
-    [*] --> ACTIVE: POST /sessions/start
-    [*] --> ACTIVE: POST /sessions/start-by-plate
-    [*] --> BookingCheck: POST /sessions/start-with-booking/{id}
+flowchart TB
+    Auth["Auth Service :8082"] --> AuthTables["users<br/>user_roles"]
+    Location["Location Service :8083"] --> LocationTables["parking_zones<br/>parking_locations<br/>parking_spaces<br/>camera_devices"]
+    Booking["Booking Service :8084"] --> BookingTables["parking_bookings<br/>parking_sessions"]
+    Payment["Payment Service :8085"] --> PaymentTables["mock_cards<br/>payment_rules<br/>payment_transactions"]
 
-    BookingCheck --> ACTIVE: Booking is CONFIRMED
-    BookingCheck --> Rejected: Booking is not CONFIRMED
+    AuthTables --> DB[("Shared PostgreSQL database<br/>parking_db")]
+    LocationTables --> DB
+    BookingTables --> DB
+    PaymentTables --> DB
 
-    ACTIVE --> ENDED: POST /sessions/{sessionId}/end
-    Rejected --> [*]
-    ENDED --> [*]
+    API["API Service :8081"] -.-> NoTables["No datasource and<br/>no domain tables"]
 ```
 
-Session query endpoints are:
+The four stateful services use the same configured PostgreSQL database. They own different groups of tables inside that database.
 
-- `GET /sessions/active`
-- `GET /sessions/by-vehicle/{registrationNumber}`
-
-The domain enum also contains `CANCELLED`, but the current controller does not expose a session-cancellation endpoint.
-
-## 8. Location and Camera Flow
+## 6. Location Service Flow
 
 ```mermaid
 flowchart TD
-    Zone["Create parking zone"] --> Location["Create parking location"]
-    Location --> Space["Create one or more spaces"]
-    Space --> Status["Update space status"]
-    Status --> Availability["Calculate location or zone availability"]
+    Client["Client + JWT"] --> Zone["POST :8083/zones"]
+    Zone --> ZoneId["Save zoneId"]
 
-    Location --> Camera["Register mock camera"]
-    Camera --> Upload["Upload multipart image"]
-    Upload --> Plate["Return random mock registration plate"]
-    Plate --> Session["Client calls<br/>POST /sessions/start-by-plate"]
+    ZoneId --> Location["POST :8083/parking-locations"]
+    Location --> LocationId["Save locationId"]
+
+    LocationId --> Space["POST :8083/parking-locations/{locationId}/spaces"]
+    Space --> SpaceId["Save spaceId"]
+
+    SpaceId --> Update["PATCH :8083/spaces/{spaceId}/status"]
+    Update --> LocationAvailability["GET location availability"]
+    Update --> ZoneAvailability["GET zone availability"]
+
+    LocationId --> Camera["POST location camera"]
+    Camera --> CameraId["Save cameraId"]
+    CameraId --> Scan["POST multipart plate event"]
+    Scan --> Plate["Receive random mock<br/>registration number"]
 ```
 
-The camera endpoint does not call the Booking service. It returns a mock plate to the client, which must then start the session in a separate request.
+The collection also lists zones, locations, and spaces. The availability endpoints calculate totals from the location and space records stored by the Location service.
 
-## 9. Payment Decision Flow
+## 7. Booking and Parking Session Flow
 
 ```mermaid
 flowchart TD
-    Intent["Create payment intent<br/>status CREATED"] --> Confirm["Confirm payment"]
-    Confirm --> CardState{"Card state"}
+    Client["Client + JWT"] --> CreateBooking["POST :8084/bookings"]
+    CreateBooking --> Requested["Booking status REQUESTED<br/>Save bookingId"]
 
-    CardState -->|EXPIRED| Expired["DECLINED<br/>CARD_EXPIRED"]
-    CardState -->|BLOCKED| Blocked["DECLINED<br/>CARD_BLOCKED"]
-    CardState -->|ACTIVE| Rules{"Active payment rules"}
+    Requested --> Confirm["POST /bookings/{bookingId}/confirm"]
+    Confirm --> Confirmed["Booking status CONFIRMED"]
+    Requested --> Cancel["POST /bookings/{bookingId}/cancel"]
+    Cancel --> Cancelled["Booking status CANCELLED"]
 
-    Rules -->|DECLINE_ALWAYS| RuleDecline["DECLINED_BY_ACTIVE_RULE"]
-    Rules -->|Amount above threshold| Threshold["AMOUNT_ABOVE_RULE_THRESHOLD"]
-    Rules -->|No matching decline| Balance{"Enough balance?"}
+    Confirmed --> StartWithBooking["POST /sessions/start-with-booking/{bookingId}"]
+    Client --> AdHoc["POST /sessions/start"]
+    Client --> ByPlate["POST /sessions/start-by-plate"]
 
-    Balance -->|No| Insufficient["DECLINED<br/>INSUFFICIENT_BALANCE"]
-    Balance -->|Yes| Success["Debit card<br/>status SUCCEEDED"]
-    Success --> Refund["Optional refund"]
-    Refund --> Refunded["Restore balance<br/>status REFUNDED"]
+    StartWithBooking --> Active["Session status ACTIVE<br/>Save sessionId"]
+    AdHoc --> Active
+    ByPlate --> Active
+
+    Active --> ActiveQuery["GET /sessions/active"]
+    Active --> VehicleQuery["GET /sessions/by-vehicle/{registrationNumber}"]
+    Active --> End["POST /sessions/{sessionId}/end"]
+    End --> Ended["Session status ENDED"]
 ```
 
-The Payment service uses mock cards and rules intended for deterministic QA testing. It does not integrate with a real payment provider.
+The client passes `locationId` and optional `spaceId` into booking or session payloads. The Booking service does not call the Location service to obtain them.
 
-## 10. Automated Testing Architecture
+## 8. Payment Service Flow
+
+```mermaid
+flowchart TD
+    Client["Client + JWT"] --> Card["POST :8085/test-cards"]
+    Card --> CardId["Card status ACTIVE<br/>Save cardId"]
+
+    CardId --> Balance["PATCH card balance"]
+    CardId --> Expire["POST expire card"]
+    CardId --> Block["POST block card"]
+
+    Client --> Rule["POST /payment-rules"]
+    Rule --> RuleList["GET /payment-rules"]
+
+    CardId --> Intent["POST /payments/intent"]
+    Intent --> Created["Payment status CREATED<br/>Save paymentId"]
+    Created --> Confirm["POST /payments/{paymentId}/confirm"]
+
+    Confirm --> Decision{"Card, rules and balance valid?"}
+    Decision -->|Yes| Success["SUCCEEDED<br/>Debit mock-card balance"]
+    Decision -->|No| Declined["DECLINED<br/>Store failure reason"]
+
+    Success --> Refund["POST /payments/{paymentId}/refund"]
+    Refund --> Refunded["REFUNDED<br/>Restore mock-card balance"]
+
+    Success --> Queries["GET all, mine or by paymentId"]
+    Declined --> Queries
+    Refunded --> Queries
+```
+
+The payment implementation is a mock system for QA. It does not communicate with a real payment provider.
+
+## 9. Full Collection Business Journey
+
+```mermaid
+sequenceDiagram
+    autonumber
+
+    actor Client
+    participant Auth as Auth :8082
+    participant Location as Location :8083
+    participant Booking as Booking :8084
+    participant Payment as Payment :8085
+    participant DB as Shared parking_db
+
+    Client->>Auth: Register and login
+    Auth->>DB: Store/read user
+    Auth-->>Client: JWT
+
+    Client->>Location: Create zone
+    Location->>DB: Insert parking_zones
+    Location-->>Client: zoneId
+
+    Client->>Location: Create location with zoneId
+    Location->>DB: Insert parking_locations
+    Location-->>Client: locationId
+
+    Client->>Location: Create space with locationId
+    Location->>DB: Insert parking_spaces
+    Location-->>Client: spaceId
+
+    Client->>Booking: Create booking with locationId and spaceId
+    Booking->>DB: Insert REQUESTED booking
+    Booking-->>Client: bookingId
+
+    Client->>Booking: Confirm booking
+    Booking->>DB: Set CONFIRMED
+
+    Client->>Booking: Start session with bookingId
+    Booking->>DB: Insert ACTIVE session
+    Booking-->>Client: sessionId
+
+    Client->>Payment: Create mock card
+    Payment->>DB: Insert mock_cards
+    Payment-->>Client: cardId
+
+    Client->>Payment: Create intent with cardId and bookingId/sessionId
+    Payment->>DB: Insert CREATED transaction
+    Payment-->>Client: paymentId
+
+    Client->>Payment: Confirm payment
+    Payment->>DB: Update payment and card balance
+
+    Client->>Booking: End session with sessionId
+    Booking->>DB: Set ENDED
+```
+
+The client coordinates this journey. A response ID from one service becomes input to a later direct request to another service.
+
+## 10. Logical Cross-Service References
+
+```mermaid
+erDiagram
+    PARKING_ZONE ||--o{ PARKING_LOCATION : contains
+    PARKING_LOCATION ||--o{ PARKING_SPACE : contains
+    PARKING_LOCATION ||--o{ CAMERA_DEVICE : has
+
+    USER ||--o{ BOOKING : creates
+    PARKING_LOCATION ||--o{ BOOKING : locationId
+    PARKING_SPACE ||--o{ BOOKING : optional_spaceId
+
+    BOOKING ||--o| PARKING_SESSION : optional_bookingId
+    PARKING_LOCATION ||--o{ PARKING_SESSION : locationId
+    PARKING_SPACE ||--o{ PARKING_SESSION : optional_spaceId
+
+    USER ||--o{ PAYMENT_TRANSACTION : creates
+    MOCK_CARD ||--o{ PAYMENT_TRANSACTION : cardId
+    BOOKING ||--o{ PAYMENT_TRANSACTION : optional_bookingId
+    PARKING_SESSION ||--o{ PAYMENT_TRANSACTION : optional_sessionId
+```
+
+This diagram represents logical relationships visible in request payloads and entity fields. It does not imply that every relationship is enforced by a database foreign key.
+
+## 11. Automated Testing Path
 
 ```mermaid
 flowchart LR
@@ -294,38 +313,38 @@ flowchart LR
     Features --> Steps["Step definitions"]
 
     Steps --> RestAssured["Rest Assured"]
-    RestAssured --> Gateway["Gateway or direct service URL"]
+    RestAssured --> API["API :8081"]
+    RestAssured --> Auth["Auth :8082"]
+    RestAssured --> Location["Location :8083"]
+    RestAssured --> Booking["Booking :8084"]
+    RestAssured --> Payment["Payment :8085"]
 
-    Steps --> JDBC["JDBC DB checks"]
+    Steps --> JDBC["JDBC verification"]
     JDBC --> Tunnel["Optional SSH tunnel<br/>localhost:15432"]
-    Tunnel --> EC2["EC2 bastion / test runner"]
-    EC2 --> RDS[("Private RDS parking_db")]
+    Tunnel --> EC2["EC2 instance"]
+    EC2 --> RDS[("Private RDS<br/>parking_db")]
 
-    TestNG --> Cucumber["Cucumber HTML / JSON"]
-    TestNG --> Surefire["Surefire XML"]
-    TestNG --> AllureResults["Allure results"]
-    AllureResults --> Allure["Allure HTML report"]
+    TestNG --> Reports["Cucumber HTML / JSON<br/>Surefire XML<br/>Allure results"]
 ```
 
-For local database verification against private RDS, `localhost:15432` is the local end of the SSH tunnel. Traffic is forwarded through EC2 to RDS; PostgreSQL is not running on the tester's computer.
+The Rest Assured tests should use the same direct service base URLs as the collection. For AWS, replace `localhost` with the configured EC2 service host while retaining each service port.
 
-## 11. Service Classification
+## 12. Service Responsibilities
 
-| Service | Port | Classification | Current responsibility |
+| Service | Direct port | Used in collection | Responsibility |
 | --- | ---: | --- | --- |
-| Gateway | 8080 | Core infrastructure | Routing, JWT enforcement, headers, rate limiting, retries, circuit breakers, and fallback |
-| Auth | 8082 | Core business support | User registration, roles, login, and JWT generation |
-| Location | 8083 | Core domain | Zones, locations, spaces, availability, cameras, and mock plate events |
-| Booking | 8084 | Core domain | Future bookings and actual parking sessions |
-| Payment | 8085 | Core domain | Mock cards, test rules, payment intents, confirmation, decline, and refund |
-| API | 8081 | Optional demonstration | Status and secured sample endpoints; not used by the parking workflow |
+| API | 8081 | Yes | Public status and secured JWT demonstration endpoint |
+| Auth | 8082 | Yes | Registration, login, roles, and JWT generation |
+| Location | 8083 | Yes | Zones, locations, spaces, availability, cameras, and plate events |
+| Booking | 8084 | Yes | Bookings and parking sessions |
+| Payment | 8085 | Yes | Mock cards, rules, payment intent, confirmation, decline, and refund |
 
-## 12. Important QA Implications
+## 13. QA Implications
 
-- Test the API service independently as a JWT/security sample, but do not include it as a required step in the parking end-to-end flow.
-- Test the gateway and each downstream service because JWT validation occurs at both layers.
-- Verify records in the shared `parking_db`, using the table group owned by the service under test.
-- Test invalid cross-service IDs because the services do not currently call one another to verify every reference.
-- Test cross-user access to bookings, sessions, and payments because ID-based operations require careful ownership controls.
-- Test repeated confirm, cancel, end-session, payment-confirm, and refund requests because state transitions are handled inside individual controllers.
-- For camera tests, assert plate format and response source rather than expecting the uploaded image to be genuinely recognized.
+- Configure and test a separate base URL for each service.
+- Obtain the JWT from Auth and send it directly to every protected service.
+- Treat the API service as an independent security check, not a required parking workflow step.
+- Capture resource IDs from responses and pass them into later requests, as the Postman collection does.
+- Verify writes against the correct table group in the shared `parking_db`.
+- Test invalid cross-service IDs because services do not call one another to validate every reference.
+- Test `401`, `403`, validation, not-found, ownership, and state-transition behavior directly on each service.
