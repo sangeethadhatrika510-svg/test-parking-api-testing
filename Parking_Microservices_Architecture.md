@@ -1,17 +1,12 @@
 # Parking Services Architecture
 
-This document is based on two sources:
+This document explains the implemented Parking Platform microservices, their responsibilities, data ownership, security model, and business workflows. It is intended to help the testing team understand what must be tested independently and across services.
 
-- The Spring Boot controller and configuration code under `D:\Project\Parking`.
-- `Parking Platform.postman_collection.json` and `Parking Local.postman_environment.json`.
-
-The Postman collection communicates directly with each service. This document therefore shows direct service communication only.
-
-## 1. Services Used by the Collection
+## 1. Microservices Overview
 
 ```mermaid
 flowchart LR
-    Client["Client<br/>Postman / Rest Assured / Application"]
+    Client["Client Application<br/>or Automated Test"]
 
     API["API Service<br/>http://localhost:8081<br/>Status and secured sample"]
     Auth["Auth Service<br/>http://localhost:8082<br/>Register, login, JWT"]
@@ -36,37 +31,9 @@ flowchart LR
     class API sample;
 ```
 
-The API service appears in the collection, but it is not used to perform the parking business workflow. It independently demonstrates a public status endpoint and a JWT-protected endpoint.
+The platform contains **five directly accessible microservices**. Auth, Location, Booking, and Payment form the core parking workflow. The API service is a small independent service used to demonstrate public and JWT-protected endpoints.
 
-## 2. Postman Collection Structure
-
-```mermaid
-flowchart TB
-    Collection["Parking Platform Postman Collection"]
-
-    Collection --> AuthFolder["Auth Service"]
-    AuthFolder --> AuthStatus["GET /status"]
-    AuthFolder --> RegisterAdmin["POST /auth/register<br/>Admin user"]
-    AuthFolder --> RegisterUser["POST /auth/register<br/>Standard user"]
-    AuthFolder --> Login["POST /auth/login"]
-
-    Collection --> APIFolder["API Service"]
-    APIFolder --> APIStatus["GET /status"]
-    APIFolder --> SecureSample["GET /api/secure/hello"]
-
-    Collection --> LocationFolder["Location Service"]
-    LocationFolder --> LocationOperations["Status, zones, locations,<br/>spaces, availability, cameras"]
-
-    Collection --> BookingFolder["Booking Service"]
-    BookingFolder --> BookingOperations["Status, bookings,<br/>sessions and session queries"]
-
-    Collection --> PaymentFolder["Payment Service"]
-    PaymentFolder --> PaymentOperations["Status, test cards, rules,<br/>payment lifecycle and queries"]
-```
-
-Postman stores returned identifiers in collection variables such as `zoneId`, `locationId`, `spaceId`, `cameraId`, `bookingId`, `sessionId`, `cardId`, and `paymentId`. Later requests use those variables directly.
-
-## 3. Authentication and Direct JWT Use
+## 2. Authentication and Direct JWT Use
 
 ```mermaid
 sequenceDiagram
@@ -97,11 +64,11 @@ sequenceDiagram
     Domain-->>Client: API response
 ```
 
-The token returned by Auth is stored as the Postman `token` variable. The collection sends it directly to protected APIs using `Authorization: Bearer {{token}}`.
+The client sends the token directly to protected APIs using `Authorization: Bearer <accessToken>`.
 
 The protected services validate the JWT themselves using the configured shared secret. They do not call Auth for every request.
 
-## 4. API Service Scope
+## 3. API Service Scope
 
 ```mermaid
 flowchart LR
@@ -116,9 +83,9 @@ flowchart LR
     Secure -.-> ParkingFlow["No location, booking,<br/>session or payment operations"]
 ```
 
-The controller also provides aliases `GET /api/status` and `GET /api/secure/sample`. The current collection uses `/status` and `/api/secure/hello`.
+The controller provides `GET /status`, `GET /api/status`, `GET /api/secure/hello`, and `GET /api/secure/sample`.
 
-## 5. Shared Database and Table Ownership
+## 4. Shared Database and Table Ownership
 
 ```mermaid
 flowchart TB
@@ -137,7 +104,7 @@ flowchart TB
 
 The four stateful services use the same configured PostgreSQL database. They own different groups of tables inside that database.
 
-## 6. Location Service Flow
+## 5. Location Service Flow
 
 ```mermaid
 flowchart TD
@@ -160,9 +127,9 @@ flowchart TD
     Scan --> Plate["Receive random mock<br/>registration number"]
 ```
 
-The collection also lists zones, locations, and spaces. The availability endpoints calculate totals from the location and space records stored by the Location service.
+The availability endpoints calculate totals from the location and space records stored by the Location service.
 
-## 7. Booking and Parking Session Flow
+## 6. Booking and Parking Session Flow
 
 ```mermaid
 flowchart TD
@@ -190,7 +157,7 @@ flowchart TD
 
 The client passes `locationId` and optional `spaceId` into booking or session payloads. The Booking service does not call the Location service to obtain them.
 
-## 8. Payment Service Flow
+## 7. Payment Service Flow
 
 ```mermaid
 flowchart TD
@@ -222,7 +189,7 @@ flowchart TD
 
 The payment implementation is a mock system for QA. It does not communicate with a real payment provider.
 
-## 9. Full Collection Business Journey
+## 8. End-to-End Parking Business Journey
 
 ```mermaid
 sequenceDiagram
@@ -279,7 +246,7 @@ sequenceDiagram
 
 The client coordinates this journey. A response ID from one service becomes input to a later direct request to another service.
 
-## 10. Logical Cross-Service References
+## 9. Logical Cross-Service References
 
 ```mermaid
 erDiagram
@@ -303,7 +270,7 @@ erDiagram
 
 This diagram represents logical relationships visible in request payloads and entity fields. It does not imply that every relationship is enforced by a database foreign key.
 
-## 11. Automated Testing Path
+## 10. Automated Testing Path
 
 ```mermaid
 flowchart LR
@@ -327,24 +294,24 @@ flowchart LR
     TestNG --> Reports["Cucumber HTML / JSON<br/>Surefire XML<br/>Allure results"]
 ```
 
-The Rest Assured tests should use the same direct service base URLs as the collection. For AWS, replace `localhost` with the configured EC2 service host while retaining each service port.
+Rest Assured tests communicate directly with the service base URLs. For AWS, use the configured EC2 service host with the appropriate service port.
 
-## 12. Service Responsibilities
+## 11. Service Responsibilities
 
-| Service | Direct port | Used in collection | Responsibility |
+| Service | Direct port | Business role | Responsibility |
 | --- | ---: | --- | --- |
-| API | 8081 | Yes | Public status and secured JWT demonstration endpoint |
-| Auth | 8082 | Yes | Registration, login, roles, and JWT generation |
-| Location | 8083 | Yes | Zones, locations, spaces, availability, cameras, and plate events |
-| Booking | 8084 | Yes | Bookings and parking sessions |
-| Payment | 8085 | Yes | Mock cards, rules, payment intent, confirmation, decline, and refund |
+| API | 8081 | Supporting sample | Public status and secured JWT demonstration endpoint |
+| Auth | 8082 | Core security | Registration, login, roles, and JWT generation |
+| Location | 8083 | Core parking inventory | Zones, locations, spaces, availability, cameras, and plate events |
+| Booking | 8084 | Core parking operation | Bookings and parking sessions |
+| Payment | 8085 | Core payment operation | Mock cards, rules, payment intent, confirmation, decline, and refund |
 
-## 13. QA Implications
+## 12. QA Implications
 
 - Configure and test a separate base URL for each service.
 - Obtain the JWT from Auth and send it directly to every protected service.
 - Treat the API service as an independent security check, not a required parking workflow step.
-- Capture resource IDs from responses and pass them into later requests, as the Postman collection does.
+- Capture resource IDs from responses and pass them into later service requests.
 - Verify writes against the correct table group in the shared `parking_db`.
 - Test invalid cross-service IDs because services do not call one another to validate every reference.
 - Test `401`, `403`, validation, not-found, ownership, and state-transition behavior directly on each service.
