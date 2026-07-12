@@ -104,11 +104,11 @@ The workflow at `.github/workflows/api-tests.yml` provides:
 
 - Java 21 and Maven framework validation on pushes and pull requests to `main`.
 - Manual API test runs with environment and Cucumber tag inputs.
-- A daily scheduled test run at 06:00 UTC when the `BASE_URL` secret is configured.
+- A daily scheduled test run at 06:00 UTC using the QA profile by default.
 - Cucumber HTML/JSON, Allure HTML, and Surefire XML workflow artifacts.
 - Allure publication through GitHub Pages for manual and scheduled test runs.
 
-For scheduled execution, add `BASE_URL` under **Settings > Secrets and variables > Actions**. All reports remain available as workflow artifacts. To publish Allure at a permanent URL, set **Settings > Pages > Build and deployment > Source** to **GitHub Actions** before running the workflow.
+The environment profiles contain default direct service URLs. They can be overridden with repository secrets named `API_BASE_URL`, `AUTH_BASE_URL`, `LOCATION_BASE_URL`, `BOOKING_BASE_URL`, and `PAYMENT_BASE_URL`. All reports remain available as workflow artifacts. To publish Allure at a permanent URL, set **Settings > Pages > Build and deployment > Source** to **GitHub Actions** before running the workflow.
 
 ## How To Add A New API Test
 

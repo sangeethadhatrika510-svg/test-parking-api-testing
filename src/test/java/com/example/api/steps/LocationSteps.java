@@ -1,54 +1,55 @@
 package com.example.api.steps;
 
 import com.example.api.api.LocationAPI;
-import com.example.api.api.LoginAPI;
-import com.example.api.payload.LocationSpacePayload;
-import com.example.api.utils.AuthUtil;
+import com.example.api.context.TestScenarioContext;
+import com.example.api.utils.TestFixtures;
 import io.cucumber.java.en.Given;
 import io.cucumber.java.en.Then;
 import io.cucumber.java.en.When;
-import io.restassured.response.Response;
-
-import static org.junit.Assert.assertEquals;
-
+import org.testng.Assert;
 
 public class LocationSteps {
-public static  Response locResponse;
-    public static  Response locSpaceResponse;
+    private final TestScenarioContext context = TestScenarioContext.current();
 
     @Given("User in location Page")
-    public void user_in_location_page() {
-
-        System.out.println("user provided location details");
+    public void createLocationPrerequisites() {
+        TestFixtures.createZone(context);
+        context.locationName = "QA Location " + Long.toString(System.nanoTime(), 36);
     }
 
     @When("User enters location details")
-    public void user_enters_location_details() {
-      locResponse= LocationAPI.locationResponse();
-      int locID=locResponse.jsonPath().getInt("id");
-
+    public void createLocation() {
+        context.response = LocationAPI.createLocation(context.token, context.zoneId,
+                context.locationName, "1 Test Street", "UNMAPPED_AREA", true);
     }
 
     @Then("User created location successfully")
-    public void user_created_location_successfully() {
-        assertEquals(201,locResponse.getStatusCode());
-
+    public void verifyLocation() {
+        TestFixtures.requireStatus(context.response, 201, "create location");
+        Assert.assertTrue(context.response.jsonPath().getInt("id") > 0);
+        Assert.assertEquals(context.response.jsonPath().getInt("zoneId"), context.zoneId);
+        Assert.assertEquals(context.response.jsonPath().getString("name"), context.locationName);
     }
+
     @Given("User in locationSpace Page")
-    public void user_in_locationSpace_page() {
-        System.out.println("user provided location space details");
+    public void createSpacePrerequisites() {
+        TestFixtures.createLocation(context);
+        context.spaceCode = "SPACE-" + Long.toString(System.nanoTime(), 36).toUpperCase();
     }
+
     @When("User enters locationSpace details")
-    public void user_enters_locationSpace_details() {
-        locSpaceResponse= LocationAPI.locationSpaceResponse();
-
-        int spaceID=locSpaceResponse.jsonPath().getInt("id");
-
+    public void createSpace() {
+        context.response = LocationAPI.createSpace(
+                context.token, context.locationId, context.spaceCode, "AVAILABLE", true);
     }
+
     @Then("User created locationSpace successfully")
-    public void user_created_locationSpace_successfully() {
-
+    public void verifySpace() {
+        TestFixtures.requireStatus(context.response, 201, "create parking space");
+        Assert.assertTrue(context.response.jsonPath().getInt("id") > 0);
+        Assert.assertEquals(context.response.jsonPath().getInt("locationId"), context.locationId);
+        Assert.assertEquals(context.response.jsonPath().getString("code"), context.spaceCode);
+        Assert.assertEquals(context.response.jsonPath().getString("status"), "AVAILABLE");
+        Assert.assertTrue(context.response.jsonPath().getBoolean("reservable"));
     }
-
-
 }

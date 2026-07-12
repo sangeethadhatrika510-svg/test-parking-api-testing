@@ -1,22 +1,17 @@
 package com.example.api.payload;
 
 import com.example.api.model.Register;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.ObjectWriter;
-
 import java.util.ArrayList;
+import java.util.List;
 
 public class RegisterPayload {
 
-    public static Register registerpayload(String username, String email, String password, ArrayList<String> roles ) throws JsonProcessingException {
-
-       Register reg=new Register();
-       reg.setUsername(username);
-       reg.setEmail(email);
-       reg.setPassword(password);
-       reg.setRoles(roles);
-
-       return reg;
+    public static Register registerPayload(String username, String email, String password, List<String> roles) {
+        Register register = new Register();
+        register.setUsername(username);
+        register.setEmail(email);
+        register.setPassword(password);
+        register.setRoles(new ArrayList<>(roles));
+        return register;
     }
 }

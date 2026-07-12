@@ -1,6 +1,6 @@
 Feature: Zones
 
-  @regression @zones
+  @location @smoke @regression @zones
   Scenario: validate with valid zones
     Given User in zone Page
     When User enters zones details

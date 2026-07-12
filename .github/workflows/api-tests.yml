@@ -17,10 +17,6 @@ on:
         required: true
         default: "@smoke"
         type: string
-      base_url:
-        description: "Optional API base URL override"
-        required: false
-        type: string
   pull_request:
     branches: [main]
   push:
@@ -49,7 +45,11 @@ jobs:
     env:
       TEST_ENV: ${{ github.event_name == 'workflow_dispatch' && inputs.test_env || 'qa' }}
       CUCUMBER_TAGS: ${{ github.event_name == 'workflow_dispatch' && inputs.cucumber_tags || '@smoke' }}
-      BASE_URL: ${{ github.event_name == 'workflow_dispatch' && inputs.base_url || secrets.BASE_URL }}
+      API_BASE_URL: ${{ secrets.API_BASE_URL }}
+      AUTH_BASE_URL: ${{ secrets.AUTH_BASE_URL }}
+      LOCATION_BASE_URL: ${{ secrets.LOCATION_BASE_URL }}
+      BOOKING_BASE_URL: ${{ secrets.BOOKING_BASE_URL }}
+      PAYMENT_BASE_URL: ${{ secrets.PAYMENT_BASE_URL }}
 
     steps:
       - name: Checkout
@@ -68,17 +68,11 @@ jobs:
           echo "Event       : ${{ github.event_name }}"
           echo "Environment : $TEST_ENV"
           echo "Tags        : $CUCUMBER_TAGS"
-          echo "Base URL    : ${BASE_URL:-profile default}"
+          echo "Service URLs: repository secrets or $TEST_ENV profile defaults"
 
       - name: Compile framework
         if: github.event_name == 'pull_request' || github.event_name == 'push'
         run: mvn --batch-mode test-compile
-
-      - name: Require BASE_URL for scheduled runs
-        if: github.event_name == 'schedule' && env.BASE_URL == ''
-        run: |
-          echo "Set the BASE_URL repository secret before enabling scheduled runs." >&2
-          exit 1
 
       - name: Run Maven tests
         if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
@@ -86,11 +80,7 @@ jobs:
         continue-on-error: true
         shell: bash
         run: |
-          args=(clean test "-Dtest.env=$TEST_ENV" "-Dcucumber.filter.tags=$CUCUMBER_TAGS")
-          if [ -n "$BASE_URL" ]; then
-            args+=("-Dbase.url=$BASE_URL")
-          fi
-          mvn --batch-mode "${args[@]}"
+          mvn --batch-mode clean test "-Dtest.env=$TEST_ENV" "-Dcucumber.filter.tags=$CUCUMBER_TAGS"
 
       - name: Add Allure executor metadata
         if: always() && (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule')
@@ -188,7 +178,6 @@ jobs:
             echo "| --- | --- |"
             echo "| Environment | \`$TEST_ENV\` |"
             echo "| Tags | \`$CUCUMBER_TAGS\` |"
-            echo "| Base URL | \`${BASE_URL:-profile default}\` |"
             if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.event_name }}" = "schedule" ]; then
               echo "| Test result | \`${{ steps.tests.outcome }}\` |"
               echo ""

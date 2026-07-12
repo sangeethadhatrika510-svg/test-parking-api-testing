@@ -1,33 +1,33 @@
 package com.example.api.steps;
 
 import com.example.api.api.ZonesAPI;
-import com.example.api.utils.AuthUtil;
+import com.example.api.context.TestScenarioContext;
+import com.example.api.utils.TestFixtures;
 import io.cucumber.java.en.Given;
 import io.cucumber.java.en.Then;
 import io.cucumber.java.en.When;
-import io.restassured.response.Response;
-
-import static org.junit.Assert.assertEquals;
+import org.testng.Assert;
 
 public class ZonesSteps {
-    static Response zoneRes;
+    private final TestScenarioContext context = TestScenarioContext.current();
+
     @Given("User in zone Page")
-    public void user_in_zone_page() {
-       System.out.println("User provided zone details");
-
+    public void authenticateAdministrator() {
+        TestFixtures.loginAdmin(context);
+        context.zoneCode = "ZONE-" + Long.toString(System.nanoTime(), 36).toUpperCase();
     }
+
     @When("User enters zones details")
-    public void user_enters_zones_details() {
-         zoneRes= ZonesAPI.zoneResponse();
-         int id=zoneRes.jsonPath().getInt("id");
-        AuthUtil.zoneId=id;
-        System.out.println("ID " + id);
-
-
+    public void createZone() {
+        context.response = ZonesAPI.createZone(context.token, context.zoneCode,
+                "QA Parking Zone", "Dublin", "Created by API automation", true);
     }
-    @Then("User created zone successfully")
-    public void user_created_zone_successfully() {
-        assertEquals(201,zoneRes.getStatusCode());
 
+    @Then("User created zone successfully")
+    public void verifyZone() {
+        TestFixtures.requireStatus(context.response, 201, "create zone");
+        Assert.assertTrue(context.response.jsonPath().getInt("id") > 0);
+        Assert.assertEquals(context.response.jsonPath().getString("code"), context.zoneCode);
+        Assert.assertTrue(context.response.jsonPath().getBoolean("active"));
     }
 }

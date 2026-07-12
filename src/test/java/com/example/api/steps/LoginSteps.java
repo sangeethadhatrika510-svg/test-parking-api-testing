@@ -1,31 +1,32 @@
 package com.example.api.steps;
 
 import com.example.api.api.LoginAPI;
+import com.example.api.context.TestScenarioContext;
+import com.example.api.utils.TestFixtures;
 import io.cucumber.java.en.Given;
 import io.cucumber.java.en.Then;
 import io.cucumber.java.en.When;
-import io.restassured.response.Response;
 import org.testng.Assert;
 
-import static org.junit.Assert.assertEquals;
-
 public class LoginSteps {
-    static Response loginJsonResponse;
-    public static String accessToken;
+    private final TestScenarioContext context = TestScenarioContext.current();
+
     @Given("User in Login Page")
-    public void userInLoginPage() {
-        System.out.println("User login details provided");
+    public void registerLoginUser() {
+        TestFixtures.createAdmin(context);
     }
+
     @When("User enters username and password")
-    public void userEntersUsernameAndPassword() {
-        loginJsonResponse= LoginAPI.loginResponse();
-        accessToken=loginJsonResponse.getBody().jsonPath().getString("accessToken");
-        System.out.println("Data "+ loginJsonResponse.toString());
-        System.out.println("AccessToken "+ accessToken);
-        System.out.println("ResponseTime "+ loginJsonResponse.getTime());
+    public void login() {
+        context.response = LoginAPI.login(context.username, context.password);
     }
+
     @Then("User logins successfully")
-    public void userLoginsSuccessfully() {
-        assertEquals(200,loginJsonResponse.getStatusCode());
+    public void verifyLogin() {
+        TestFixtures.requireStatus(context.response, 200, "login user");
+        Assert.assertEquals(context.response.jsonPath().getString("tokenType"), "Bearer");
+        Assert.assertEquals(context.response.jsonPath().getString("username"), context.username);
+        Assert.assertFalse(context.response.jsonPath().getString("accessToken").isBlank());
+        Assert.assertTrue(context.response.jsonPath().getList("roles", String.class).contains("ADMIN"));
     }
 }

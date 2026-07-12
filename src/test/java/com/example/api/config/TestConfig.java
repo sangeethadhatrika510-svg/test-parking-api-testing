@@ -19,6 +19,20 @@ public final class TestConfig {
         return get("base.url");
     }
 
+    public static String serviceBaseUrl(String service) {
+        String key = service + ".base.url";
+        String environmentKey = service.toUpperCase() + "_BASE_URL";
+        String environmentValue = System.getenv(environmentKey);
+        if (environmentValue != null && !environmentValue.isBlank()) {
+            return withoutTrailingSlash(environmentValue);
+        }
+        String value = get(key);
+        if (value == null || value.isBlank()) {
+            throw new IllegalStateException("Missing service URL configuration: " + key);
+        }
+        return withoutTrailingSlash(value);
+    }
+
     public static int requestTimeoutMs() {
         return Integer.parseInt(get("request.timeout.ms", "10000"));
     }
@@ -33,6 +47,10 @@ public final class TestConfig {
             return systemValue;
         }
         return PROPERTIES.getProperty(key, defaultValue);
+    }
+
+    private static String withoutTrailingSlash(String value) {
+        return value.endsWith("/") ? value.substring(0, value.length() - 1) : value;
     }
 
     private static Properties loadProperties() {

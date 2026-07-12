@@ -19,7 +19,7 @@
         <cucumber.version>7.20.1</cucumber.version>
         <testng.version>7.10.2</testng.version>
         <jackson.version>2.18.2</jackson.version>
-        <slf4j.version>2.0.16</slf4j.version>
+        <slf4j.version>1.7.36</slf4j.version>
         <surefire.version>3.5.2</surefire.version>
         <allure.version>2.29.0</allure.version>
         <allure.maven.version>2.15.2</allure.maven.version>
@@ -49,18 +49,6 @@
             <artifactId>cucumber-testng</artifactId>
             <version>${cucumber.version}</version>
             <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>io.cucumber</groupId>
-            <artifactId>cucumber-junit</artifactId>
-            <version>7.34.3</version>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>junit</groupId>
-            <artifactId>junit</artifactId>
-            <version>4.13.2</version>
-
         </dependency>
         <dependency>
             <groupId>org.testng</groupId>
