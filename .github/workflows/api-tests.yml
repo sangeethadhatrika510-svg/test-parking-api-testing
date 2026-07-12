@@ -21,11 +21,6 @@ on:
         description: "Optional API base URL override"
         required: false
         type: string
-      publish_pages:
-        description: "Publish the Allure report to GitHub Pages"
-        required: true
-        default: false
-        type: boolean
   pull_request:
     branches: [main]
   push:
@@ -67,7 +62,7 @@ jobs:
           java-version: "21"
           cache: maven
 
-      - name: Show selected configuration
+      - name: Show selected test configuration
         shell: bash
         run: |
           echo "Event       : ${{ github.event_name }}"
@@ -85,7 +80,7 @@ jobs:
           echo "Set the BASE_URL repository secret before enabling scheduled runs." >&2
           exit 1
 
-      - name: Run tagged API tests
+      - name: Run Maven tests
         if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
         id: tests
         continue-on-error: true
@@ -97,7 +92,7 @@ jobs:
           fi
           mvn --batch-mode "${args[@]}"
 
-      - name: Add Allure run metadata
+      - name: Add Allure executor metadata
         if: always() && (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule')
         shell: bash
         run: |
@@ -116,6 +111,26 @@ jobs:
       - name: Generate Allure report
         if: always() && (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule')
         run: mvn --batch-mode allure:report
+
+      - name: Normalize Allure report metadata
+        if: always() && (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule')
+        shell: bash
+        run: |
+          if [ -f target/allure-report/widgets/summary.json ]; then
+            sed -i 's/"reportName":"Allure Report"/"reportName":"Parking API Tests"/' target/allure-report/widgets/summary.json
+          fi
+          if [ -f target/allure-report/widgets/executors.json ]; then
+            cat > target/allure-report/widgets/executors.json <<EOF
+          [{
+            "name": "GitHub Actions",
+            "type": "github",
+            "buildOrder": ${{ github.run_number }},
+            "buildName": "${{ github.workflow }} #${{ github.run_number }}",
+            "buildUrl": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
+            "reportName": "Parking API Tests - ${TEST_ENV}"
+          }]
+          EOF
+          fi
 
       - name: Upload Cucumber report
         if: always() && (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule')
@@ -141,25 +156,25 @@ jobs:
           path: target/surefire-reports/
           if-no-files-found: ignore
 
-      - name: Prepare GitHub Pages
-        if: always() && github.event_name == 'workflow_dispatch' && inputs.publish_pages && github.ref == 'refs/heads/main'
+      - name: Prepare GitHub Pages report
+        if: always() && github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule')
         run: |
           mkdir -p pages
           cp -R target/allure-report/. pages/
 
       - name: Configure GitHub Pages
-        if: always() && github.event_name == 'workflow_dispatch' && inputs.publish_pages && github.ref == 'refs/heads/main'
+        if: always() && github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule')
         uses: actions/configure-pages@v5
 
       - name: Upload GitHub Pages artifact
-        if: always() && github.event_name == 'workflow_dispatch' && inputs.publish_pages && github.ref == 'refs/heads/main'
+        if: always() && github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule')
         uses: actions/upload-pages-artifact@v3
         with:
           path: pages
 
-      - name: Deploy Allure to GitHub Pages
+      - name: Deploy Allure report to GitHub Pages
         id: deploy-pages
-        if: always() && github.event_name == 'workflow_dispatch' && inputs.publish_pages && github.ref == 'refs/heads/main'
+        if: always() && github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule')
         uses: actions/deploy-pages@v4
 
       - name: Publish run summary
@@ -176,11 +191,21 @@ jobs:
             echo "| Base URL | \`${BASE_URL:-profile default}\` |"
             if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.event_name }}" = "schedule" ]; then
               echo "| Test result | \`${{ steps.tests.outcome }}\` |"
+              echo ""
+              echo "Reports are available from this workflow run's artifacts:"
+              echo ""
+              echo "- Cucumber report"
+              echo "- Allure report"
+              echo "- Surefire reports"
+              if [ -n "${{ steps.deploy-pages.outputs.page_url }}" ]; then
+                echo ""
+                echo "Published Allure report: ${{ steps.deploy-pages.outputs.page_url }}"
+              fi
             else
               echo "| Validation | \`test-compile\` |"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Fail when tests fail
+      - name: Fail job when tests fail
         if: (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') && steps.tests.outcome != 'success'
         run: exit 1
